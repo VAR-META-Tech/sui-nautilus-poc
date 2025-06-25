@@ -27,5 +27,21 @@ fastcrypto = { git = "https://github.com/MystenLabs/fastcrypto", rev = "69d496c7
 nsm_api = { git = "https://github.com/aws/aws-nitro-enclaves-nsm-api.git/", rev = "8ec7eac72bbb2097f1058ee32c13e1ff232f13e8", package="aws-nitro-enclaves-nsm-api", optional = false }
 bcs = "0.1.6"
 
+# Sui SDK dependencies - commented out for now until proper versions are available
+# sui-sdk = { git = "https://github.com/MystenLabs/sui", rev = "mainnet-v1.32.2" }
+# sui-types = { git = "https://github.com/MystenLabs/sui", rev = "mainnet-v1.32.2" }
+# sui-json-rpc-types = { git = "https://github.com/MystenLabs/sui", rev = "mainnet-v1.32.2" }
+# sui-keys = { git = "https://github.com/MystenLabs/sui", rev = "mainnet-v1.32.2" }
+
+# Seal SDK - using git as it's not published to crates.io yet
+# Note: This is a placeholder, actual Seal SDK for Rust may not be available
+# seal-sdk = { git = "https://github.com/MystenLabs/seal", branch = "main" }
+
+# Additional crypto dependencies  
+hex = "0.4"
+base64 = "0.22"
+sha2 = "0.10"
+chrono = { version = "0.4", features = ["serde"] }
+
 [dev-dependencies]
 tempfile = "3.0"

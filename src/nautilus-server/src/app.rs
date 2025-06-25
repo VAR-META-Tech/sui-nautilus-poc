@@ -4,6 +4,7 @@
 use crate::common::IntentMessage;
 use crate::common::{to_signed_response, IntentScope, ProcessDataRequest, ProcessedDataResponse, get_attestation};
 use crate::task_runner::{NodeTaskRunner, TaskConfig};
+use crate::seal_task::{SealTaskRunner, SealTaskConfig, SealTaskParams, SealTaskResult};
 use crate::AppState;
 use crate::EnclaveError;
 use axum::extract::State;
@@ -37,6 +38,17 @@ pub struct TaskResponse {
 pub struct TaskRequest {
     pub timeout_secs: Option<u64>,
     pub args: Option<Vec<String>>,
+}
+
+/// Seal task request structure
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SealTaskRequest {
+    pub address: String,
+    pub blob_id: String,
+    pub on_chain_file_obj_id: String,
+    pub policy_object_id: String,
+    pub threshold: u32,
+    pub enclave_id: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -100,6 +112,47 @@ pub async fn process_data(
         exit_code: task_output.exit_code,
         execution_time_ms: task_output.execution_time_ms,
     }))
+}
+
+/// Seal task endpoint - native Rust implementation
+pub async fn process_seal_task(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<ProcessDataRequest<SealTaskRequest>>,
+) -> Result<Json<ProcessedDataResponse<IntentMessage<SealTaskResult>>>, EnclaveError> {
+    // Get current timestamp
+    let timestamp_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+
+    // Create seal task parameters
+    let params = SealTaskParams {
+        address: request.payload.address,
+        blob_id: request.payload.blob_id,
+        on_chain_file_obj_id: request.payload.on_chain_file_obj_id,
+        policy_object_id: request.payload.policy_object_id,
+        threshold: request.payload.threshold,
+        enclave_id: request.payload.enclave_id,
+    };
+
+    // Create and configure seal task runner
+    let config = SealTaskConfig::default();
+    let seal_runner = SealTaskRunner::new(config);
+
+    // Execute the seal task
+    let seal_result = seal_runner.run(params).await.map_err(|e| {
+        EnclaveError::GenericError(format!("Seal task failed: {}", e))
+    })?;
+
+    // Sign the response with the enclave's ephemeral key
+    let signed_response = to_signed_response(
+        &state.eph_kp,
+        seal_result,
+        timestamp_ms,
+        IntentScope::SealTask,
+    );
+
+    Ok(Json(signed_response))
 }
 
 #[cfg(test)]

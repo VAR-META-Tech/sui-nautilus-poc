@@ -38,6 +38,7 @@ pub struct IntentMessage<T: Serialize> {
 #[repr(u8)]
 pub enum IntentScope {
     Weather = 0,
+    SealTask = 1,
 }
 
 impl<T: Serialize + Debug> IntentMessage<T> {
