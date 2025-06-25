@@ -12,6 +12,8 @@ pub mod app;
 pub mod common;
 pub mod task_runner;
 pub mod seal_task;
+pub mod seal;
+pub mod sui_sdk;
 
 /// App state, at minimum needs to maintain the ephemeral keypair.  
 pub struct AppState {

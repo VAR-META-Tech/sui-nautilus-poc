@@ -137,7 +137,9 @@ pub async fn process_seal_task(
 
     // Create and configure seal task runner
     let config = SealTaskConfig::default();
-    let seal_runner = SealTaskRunner::new(config);
+    let seal_runner = SealTaskRunner::new(config).await.map_err(|e| {
+        EnclaveError::GenericError(format!("Failed to initialize Seal task runner: {}", e))
+    })?;
 
     // Execute the seal task
     let seal_result = seal_runner.run(params).await.map_err(|e| {
