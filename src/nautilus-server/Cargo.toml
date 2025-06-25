@@ -27,6 +27,25 @@ fastcrypto = { git = "https://github.com/MystenLabs/fastcrypto", rev = "69d496c7
 nsm_api = { git = "https://github.com/aws/aws-nitro-enclaves-nsm-api.git/", rev = "8ec7eac72bbb2097f1058ee32c13e1ff232f13e8", package="aws-nitro-enclaves-nsm-api", optional = false }
 bcs = "0.1.6"
 
+# WORKING SOLUTION: Hybrid approach using published crates + minimal local implementations
+# 
+# Strategy: Use official published types where available, local implementations for missing pieces
+# Reference: https://docs.rs/sui-sdk-types/latest/sui_sdk_types/
+
+# Official published crates that work
+sui-sdk-types = "0.0.5"  # Core type definitions - PUBLISHED và STABLE
+# Note: fastcrypto already included above, no need to duplicate
+
+# For specific functionality that works
+# Note: The full sui-sdk has dependency issues, but core types work fine
+
+# PROBLEMATIC - GitHub dependencies với missing packages
+# sui-sdk = { git = "https://github.com/mystenlabs/sui", package = "sui-sdk" }
+# sui-types = { git = "https://github.com/mystenlabs/sui", package = "sui-types" }  
+# sui-json-rpc-types = { git = "https://github.com/mystenlabs/sui", package = "sui-json-rpc-types" }
+# sui-keys = { git = "https://github.com/mystenlabs/sui", package = "sui-keys" }
+
+# OLD COMMENTED OUT DEPENDENCIES - These don't work due to missing packages
 # Sui SDK dependencies from GitHub - commented out due to dependency conflicts
 # Note: These dependencies have internal conflicts with missing packages
 # sui-sdk = { git = "https://github.com/MystenLabs/sui", rev = "mainnet-v1.50.1" }
