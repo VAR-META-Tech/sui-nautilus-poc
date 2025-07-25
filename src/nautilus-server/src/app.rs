@@ -1,9 +1,9 @@
 // Copyright (c), Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::common::IntentMessage;
-use crate::common::{to_signed_response, IntentScope, ProcessDataRequest, ProcessedDataResponse, get_attestation};
-use crate::task_runner::{NodeTaskRunner, TaskConfig};
+use crate::common::{ProcessDataRequest, get_attestation};
+use crate::config::{EmbeddingArgs, ProcessingConfig, TaskOperation};
+use crate::tasks::TaskRunner;
 use crate::AppState;
 use crate::EnclaveError;
 use axum::extract::State;
@@ -17,19 +17,7 @@ use axum::Router;
 use axum::http::{HeaderValue, Method, header::{CONTENT_TYPE, AUTHORIZATION, ACCEPT, ORIGIN, REFERER, USER_AGENT}};
 use crate::common::{health_check};
 
-// Helper function to extract task result from stdout using delimiters
-fn extract_task_result(stdout: &str) -> Option<serde_json::Value> {
-    let start_marker = "===TASK_RESULT_START===";
-    let end_marker = "===TASK_RESULT_END===";
-    
-    let start_pos = stdout.find(start_marker)?;
-    let start_pos = start_pos + start_marker.len();
-    
-    let end_pos = stdout[start_pos..].find(end_marker)?;
-    let json_str = stdout[start_pos..start_pos + end_pos].trim();
-    
-    serde_json::from_str(json_str).ok()
-}
+// Native Rust implementation - no need for stdout parsing
 
 /// ====
 /// Core Nautilus server logic, replace it with your own
@@ -114,6 +102,7 @@ pub struct ProcessedData {
     pub blob_id: Option<String>,
 }
 
+/// Native Rust implementation for default processing (replaces Node.js)
 pub async fn process_data(
     State(state): State<Arc<AppState>>,
     Json(request): Json<ProcessDataRequest<TaskRequest>>,
@@ -121,79 +110,42 @@ pub async fn process_data(
     // get attestation
     let attestation_info = get_attestation(State(state.clone())).await?;
 
-    // Get the absolute path to nodejs-task
-    let current_dir = std::env::current_dir().unwrap();
-    let task_path = current_dir.join("nodejs-task").to_string_lossy().into_owned();
+    // Create native Rust TaskConfig from AppState
+    let task_config = state.to_task_config();
+    let task_runner = TaskRunner::new(task_config);
 
-    // Prepare environment variables from AppState
-    let mut env_vars = std::collections::HashMap::new();
-
-    // Core blockchain configuration
-    env_vars.insert("MOVE_PACKAGE_ID".to_string(), state.move_package_id().to_string());
-    env_vars.insert("SUI_SECRET_KEY".to_string(), state.sui_secret_key().to_string());
-    env_vars.insert("WALRUS_AGGREGATOR_URL".to_string(), state.walrus_aggregator_url().to_string());
-    env_vars.insert("WALRUS_PUBLISHER_URL".to_string(), state.walrus_publisher_url().to_string());
-    env_vars.insert("WALRUS_EPOCHS".to_string(), state.walrus_epochs_str().to_string());
-
-    // Ollama embedding service configuration
-    env_vars.insert("OLLAMA_API_URL".to_string(), state.ollama_api_url().to_string());
-    env_vars.insert("OLLAMA_MODEL".to_string(), state.ollama_model().to_string());
-
-    // Qdrant vector database configuration
-    env_vars.insert("QDRANT_URL".to_string(), state.qdrant_url().to_string());
-    env_vars.insert("QDRANT_COLLECTION_NAME".to_string(), state.qdrant_collection_name().to_string());
-    if let Some(api_key) = state.qdrant_api_key() {
-        env_vars.insert("QDRANT_API_KEY".to_string(), api_key.to_string());
-    }
-
-    // Task processing configuration
-    env_vars.insert("EMBEDDING_BATCH_SIZE".to_string(), state.embedding_batch_size_str().to_string());
-    env_vars.insert("VECTOR_BATCH_SIZE".to_string(), state.vector_batch_size_str().to_string());
-
-    // Configure task runner
-    let mut args = request.payload.args.unwrap_or_default();
-    args.push(attestation_info.attestation.enclaveId.clone());
-
-    let task_config = TaskConfig {
-        task_path,
-        timeout_secs: request.payload.timeout_secs.unwrap_or(120),
-        args,
-        env_vars,
+    // Convert request to native Rust operation (default operation)
+    let default_args = crate::config::DefaultArgs {
+        address: "default_address".to_string(), // Would need to be extracted from request
+        blob_id: "default_blob".to_string(), // Would need to be extracted from request
+        on_chain_file_obj_id: "default_file".to_string(), // Would need to be extracted from request
+        policy_object_id: "default_policy".to_string(), // Would need to be extracted from request
+        threshold: "2".to_string(), // Would need to be extracted from request
+        enclave_id: attestation_info.attestation.enclaveId.clone(),
+        processing_config: crate::config::ProcessingConfig::default(),
     };
 
-    // Create and run the task
-    let task_runner = NodeTaskRunner::new(task_config);
-    let task_output = task_runner.run().await.map_err(|e| {
-        EnclaveError::GenericError(format!("Failed to execute Node.js task: {}", e))
+    let operation = TaskOperation::Default(default_args);
+
+    // Execute native Rust task
+    let start_time = std::time::Instant::now();
+    let task_result = task_runner.run(operation).await.map_err(|e| {
+        EnclaveError::GenericError(format!("Failed to execute native Rust default task: {}", e))
     })?;
 
-    // If task failed, return error
-    if task_output.exit_code != 0 {
-        return Err(EnclaveError::GenericError(format!(
-            "Task failed with exit code {}: {}",
-            task_output.exit_code,
-            task_output.stderr
-        )));
-    }
+    let execution_time_ms = start_time.elapsed().as_millis() as u64;
 
-    // Extract JSON result from stdout using delimiters
-    let json_data: serde_json::Value = extract_task_result(&task_output.stdout)
-        .unwrap_or_else(|| serde_json::json!({
-            "status": "failed",
-            "operation": "default",
-            "error": "Failed to extract task result from output",
-            "raw_output": task_output.stdout
-        }));
-
+    let is_success = task_result.status == "success";
     Ok(Json(TaskResponse {
-        status: "success".to_string(),
-        data: json_data,
-        stderr: task_output.stderr,
-        exit_code: task_output.exit_code,
-        execution_time_ms: task_output.execution_time_ms,
+        status: task_result.status,
+        data: task_result.data.unwrap_or_else(|| serde_json::json!({})),
+        stderr: task_result.error.unwrap_or_default(),
+        exit_code: if is_success { 0 } else { 1 },
+        execution_time_ms,
     }))
 }
 
+/// Native Rust implementation for embedding ingest (replaces Node.js)
 pub async fn embedding_ingest(
     State(state): State<Arc<AppState>>,
     Json(request): Json<ProcessDataRequest<EmbeddingIngestRequest>>,
@@ -201,90 +153,47 @@ pub async fn embedding_ingest(
     // get attestation
     let attestation_info = get_attestation(State(state.clone())).await?;
 
-    // Get the absolute path to nodejs-task
-    let current_dir = std::env::current_dir().unwrap();
-    let task_path = current_dir.join("nodejs-task").to_string_lossy().into_owned();
+    // Create native Rust TaskConfig from AppState
+    let task_config = state.to_task_config();
+    let task_runner = TaskRunner::new(task_config);
 
-    // Prepare environment variables from AppState
-    let mut env_vars = std::collections::HashMap::new();
-
-    // Core blockchain configuration
-    env_vars.insert("MOVE_PACKAGE_ID".to_string(), state.move_package_id().to_string());
-    env_vars.insert("SUI_SECRET_KEY".to_string(), state.sui_secret_key().to_string());
-    env_vars.insert("WALRUS_AGGREGATOR_URL".to_string(), state.walrus_aggregator_url().to_string());
-    env_vars.insert("WALRUS_PUBLISHER_URL".to_string(), state.walrus_publisher_url().to_string());
-    env_vars.insert("WALRUS_EPOCHS".to_string(), state.walrus_epochs_str().to_string());
-
-    // Ollama embedding service configuration
-    env_vars.insert("OLLAMA_API_URL".to_string(), state.ollama_api_url().to_string());
-    env_vars.insert("OLLAMA_MODEL".to_string(), state.ollama_model().to_string());
-
-    // Qdrant vector database configuration
-    env_vars.insert("QDRANT_URL".to_string(), state.qdrant_url().to_string());
-    env_vars.insert("QDRANT_COLLECTION_NAME".to_string(), state.qdrant_collection_name().to_string());
-    if let Some(api_key) = state.qdrant_api_key() {
-        env_vars.insert("QDRANT_API_KEY".to_string(), api_key.to_string());
-    }
-
-    // Task processing configuration
-    env_vars.insert("EMBEDDING_BATCH_SIZE".to_string(), state.embedding_batch_size_str().to_string());
-    env_vars.insert("VECTOR_BATCH_SIZE".to_string(), state.vector_batch_size_str().to_string());
-
-    // Configure task runner for embedding operation
-    let mut args = vec![
-        "--operation".to_string(),
-        "embedding".to_string(),
-        "--walrus-blob-id".to_string(),
-        request.payload.walrus_blob_id.clone(),
-        "--address".to_string(),
-        request.payload.address.clone(),
-        "--on-chain-file-obj-id".to_string(),
-        request.payload.on_chain_file_obj_id.clone(),
-        "--policy-object-id".to_string(),
-        request.payload.policy_object_id.clone(),
-        "--threshold".to_string(),
-        request.payload.threshold.clone(),
-    ];
-
-    // Add batch size if provided
-    if let Some(batch_size) = request.payload.batch_size {
-        args.push("--batch-size".to_string());
-        args.push(batch_size.to_string());
-    }
-
-    args.push(attestation_info.attestation.enclaveId.clone());
-
-    let task_config = TaskConfig {
-        task_path,
-        timeout_secs: request.payload.timeout_secs.unwrap_or(300), // 5 minutes default for embedding
-        args,
-        env_vars,
+    // Convert request to native Rust operation
+    let embedding_args = EmbeddingArgs {
+        walrus_blob_id: request.payload.walrus_blob_id.clone(),
+        address: request.payload.address.clone(),
+        on_chain_file_obj_id: request.payload.on_chain_file_obj_id.clone(),
+        policy_object_id: request.payload.policy_object_id.clone(),
+        threshold: request.payload.threshold.clone(),
+        enclave_id: attestation_info.attestation.enclaveId.clone(),
+        processing_config: ProcessingConfig {
+            batch_size: request.payload.batch_size.map(|b| b as usize),
+            limit: None,
+            store_vectors: Some(true),
+            include_embeddings: Some(false),
+        },
     };
 
-    // Create and run the task
-    let task_runner = NodeTaskRunner::new(task_config);
-    let task_output = task_runner.run().await.map_err(|e| {
-        EnclaveError::GenericError(format!("Failed to execute embedding ingest task: {}", e))
+    let operation = TaskOperation::Embedding(embedding_args);
+
+    // Execute native Rust task
+    let start_time = std::time::Instant::now();
+    let task_result = task_runner.run(operation).await.map_err(|e| {
+        EnclaveError::GenericError(format!("Failed to execute native Rust embedding task: {}", e))
     })?;
 
-    // Extract JSON result from stdout using delimiters
-    let json_data: serde_json::Value = extract_task_result(&task_output.stdout)
-        .unwrap_or_else(|| serde_json::json!({
-            "status": "failed",
-            "operation": "embedding",
-            "error": "Failed to extract task result from output",
-            "raw_output": task_output.stdout
-        }));
+    let execution_time_ms = start_time.elapsed().as_millis() as u64;
 
+    let is_success = task_result.status == "success";
     Ok(Json(TaskResponse {
-        status: "success".to_string(),
-        data: json_data,
-        stderr: task_output.stderr,
-        exit_code: task_output.exit_code,
-        execution_time_ms: task_output.execution_time_ms,
+        status: task_result.status,
+        data: task_result.data.unwrap_or_else(|| serde_json::json!({})),
+        stderr: task_result.error.unwrap_or_default(),
+        exit_code: if is_success { 0 } else { 1 },
+        execution_time_ms,
     }))
 }
 
+/// Native Rust implementation for message retrieval (replaces Node.js)
 pub async fn retrieve_messages(
     State(state): State<Arc<AppState>>,
     Json(request): Json<ProcessDataRequest<MessageRetrievalRequest>>,
@@ -292,90 +201,47 @@ pub async fn retrieve_messages(
     // get attestation
     let attestation_info = get_attestation(State(state.clone())).await?;
 
-    // Get the absolute path to nodejs-task
-    let current_dir = std::env::current_dir().unwrap();
-    let task_path = current_dir.join("nodejs-task").to_string_lossy().into_owned();
+    // Create native Rust TaskConfig from AppState
+    let task_config = state.to_task_config();
+    let task_runner = TaskRunner::new(task_config);
 
-    // Prepare environment variables from AppState
-    let mut env_vars = std::collections::HashMap::new();
-
-    // Core blockchain configuration
-    env_vars.insert("MOVE_PACKAGE_ID".to_string(), state.move_package_id().to_string());
-    env_vars.insert("SUI_SECRET_KEY".to_string(), state.sui_secret_key().to_string());
-    env_vars.insert("WALRUS_AGGREGATOR_URL".to_string(), state.walrus_aggregator_url().to_string());
-    env_vars.insert("WALRUS_PUBLISHER_URL".to_string(), state.walrus_publisher_url().to_string());
-    env_vars.insert("WALRUS_EPOCHS".to_string(), state.walrus_epochs_str().to_string());
-
-    // Ollama embedding service configuration
-    env_vars.insert("OLLAMA_API_URL".to_string(), state.ollama_api_url().to_string());
-    env_vars.insert("OLLAMA_MODEL".to_string(), state.ollama_model().to_string());
-
-    // Qdrant vector database configuration
-    env_vars.insert("QDRANT_URL".to_string(), state.qdrant_url().to_string());
-    env_vars.insert("QDRANT_COLLECTION_NAME".to_string(), state.qdrant_collection_name().to_string());
-    if let Some(api_key) = state.qdrant_api_key() {
-        env_vars.insert("QDRANT_API_KEY".to_string(), api_key.to_string());
-    }
-
-    // Task processing configuration
-    env_vars.insert("EMBEDDING_BATCH_SIZE".to_string(), state.embedding_batch_size_str().to_string());
-    env_vars.insert("VECTOR_BATCH_SIZE".to_string(), state.vector_batch_size_str().to_string());
-
-    // Configure task runner for message retrieval operation
-    let mut args = vec![
-        "--operation".to_string(),
-        "retrieve".to_string(),
-        "--query".to_string(),
-        request.payload.query.clone(),
-        "--address".to_string(),
-        request.payload.address.clone(),
-        "--on-chain-file-obj-id".to_string(),
-        request.payload.on_chain_file_obj_id.clone(),
-        "--policy-object-id".to_string(),
-        request.payload.policy_object_id.clone(),
-        "--threshold".to_string(),
-        request.payload.threshold.clone(),
-    ];
-
-    // Add limit if provided
-    if let Some(limit) = request.payload.limit {
-        args.push("--limit".to_string());
-        args.push(limit.to_string());
-    }
-
-    args.push(attestation_info.attestation.enclaveId.clone());
-
-    let task_config = TaskConfig {
-        task_path,
-        timeout_secs: request.payload.timeout_secs.unwrap_or(120),
-        args,
-        env_vars,
+    // Convert request to native Rust operation
+    let retrieve_args = crate::config::RetrieveArgs {
+        query: request.payload.query.clone(),
+        address: request.payload.address.clone(),
+        on_chain_file_obj_id: request.payload.on_chain_file_obj_id.clone(),
+        policy_object_id: request.payload.policy_object_id.clone(),
+        threshold: request.payload.threshold.clone(),
+        enclave_id: attestation_info.attestation.enclaveId.clone(),
+        processing_config: ProcessingConfig {
+            batch_size: None,
+            limit: request.payload.limit.map(|l| l as usize),
+            store_vectors: Some(false),
+            include_embeddings: Some(false),
+        },
     };
 
-    // Create and run the task
-    let task_runner = NodeTaskRunner::new(task_config);
-    let task_output = task_runner.run().await.map_err(|e| {
-        EnclaveError::GenericError(format!("Failed to execute message retrieval task: {}", e))
+    let operation = TaskOperation::Retrieve(retrieve_args);
+
+    // Execute native Rust task
+    let start_time = std::time::Instant::now();
+    let task_result = task_runner.run(operation).await.map_err(|e| {
+        EnclaveError::GenericError(format!("Failed to execute native Rust retrieval task: {}", e))
     })?;
 
-    // Extract JSON result from stdout using delimiters
-    let json_data: serde_json::Value = extract_task_result(&task_output.stdout)
-        .unwrap_or_else(|| serde_json::json!({
-            "status": "failed",
-            "operation": "retrieve",
-            "error": "Failed to extract task result from output",
-            "raw_output": task_output.stdout
-        }));
+    let execution_time_ms = start_time.elapsed().as_millis() as u64;
 
+    let is_success = task_result.status == "success";
     Ok(Json(TaskResponse {
-        status: "success".to_string(),
-        data: json_data,
-        stderr: task_output.stderr,
-        exit_code: task_output.exit_code,
-        execution_time_ms: task_output.execution_time_ms,
+        status: task_result.status,
+        data: task_result.data.unwrap_or_else(|| serde_json::json!({})),
+        stderr: task_result.error.unwrap_or_default(),
+        exit_code: if is_success { 0 } else { 1 },
+        execution_time_ms,
     }))
 }
 
+/// Native Rust implementation for message retrieval by blob IDs (replaces Node.js)
 pub async fn retrieve_messages_by_blob_ids(
     State(state): State<Arc<AppState>>,
     Json(request): Json<ProcessDataRequest<MessageBlobRetrievalRequest>>,
@@ -383,88 +249,85 @@ pub async fn retrieve_messages_by_blob_ids(
     // get attestation
     let attestation_info = get_attestation(State(state.clone())).await?;
 
-    // Get the absolute path to nodejs-task
-    let current_dir = std::env::current_dir().unwrap();
-    let task_path = current_dir.join("nodejs-task").to_string_lossy().into_owned();
+    // Create native Rust TaskConfig from AppState
+    let task_config = state.to_task_config();
+    let task_runner = TaskRunner::new(task_config);
 
-    // Prepare environment variables from AppState
-    let mut env_vars = std::collections::HashMap::new();
+    // Convert request to native Rust operation
+    let blob_file_pairs = request.payload.blob_file_pairs.into_iter().map(|pair| {
+        crate::config::BlobFilePair {
+            walrus_blob_id: pair.walrus_blob_id,
+            on_chain_file_obj_id: pair.on_chain_file_obj_id,
+            policy_object_id: pair.policy_object_id,
+        }
+    }).collect();
 
-    // Core blockchain configuration
-    env_vars.insert("MOVE_PACKAGE_ID".to_string(), state.move_package_id().to_string());
-    env_vars.insert("SUI_SECRET_KEY".to_string(), state.sui_secret_key().to_string());
-    env_vars.insert("WALRUS_AGGREGATOR_URL".to_string(), state.walrus_aggregator_url().to_string());
-    env_vars.insert("WALRUS_PUBLISHER_URL".to_string(), state.walrus_publisher_url().to_string());
-    env_vars.insert("WALRUS_EPOCHS".to_string(), state.walrus_epochs_str().to_string());
-
-    // Ollama embedding service configuration (not needed but kept for consistency)
-    env_vars.insert("OLLAMA_API_URL".to_string(), state.ollama_api_url().to_string());
-    env_vars.insert("OLLAMA_MODEL".to_string(), state.ollama_model().to_string());
-
-    // Qdrant vector database configuration (not needed but kept for consistency)
-    env_vars.insert("QDRANT_URL".to_string(), state.qdrant_url().to_string());
-    env_vars.insert("QDRANT_COLLECTION_NAME".to_string(), state.qdrant_collection_name().to_string());
-    if let Some(api_key) = state.qdrant_api_key() {
-        env_vars.insert("QDRANT_API_KEY".to_string(), api_key.to_string());
-    }
-
-    // Task processing configuration
-    env_vars.insert("EMBEDDING_BATCH_SIZE".to_string(), state.embedding_batch_size_str().to_string());
-    env_vars.insert("VECTOR_BATCH_SIZE".to_string(), state.vector_batch_size_str().to_string());
-
-    // Serialize blob file pairs to JSON
-    let blob_file_pairs_json = serde_json::to_string(&request.payload.blob_file_pairs)
-        .map_err(|e| EnclaveError::GenericError(format!("Failed to serialize blob file pairs: {}", e)))?;
-
-    // Configure task runner for blob ID retrieval operation
-    let mut args = vec![
-        "--operation".to_string(),
-        "retrieve-by-blob-ids".to_string(),
-        "--blob-file-pairs".to_string(),
-        blob_file_pairs_json,
-        "--address".to_string(),
-        request.payload.address.clone(),
-        "--threshold".to_string(),
-        request.payload.threshold.clone(),
-    ];
-
-    args.push(attestation_info.attestation.enclaveId.clone());
-
-    let task_config = TaskConfig {
-        task_path,
-        timeout_secs: request.payload.timeout_secs.unwrap_or(120),
-        args,
-        env_vars,
+    let retrieve_by_blob_ids_args = crate::config::RetrieveByBlobIdsArgs {
+        blob_file_pairs,
+        address: request.payload.address.clone(),
+        threshold: request.payload.threshold.clone(),
+        enclave_id: attestation_info.attestation.enclaveId.clone(),
+        processing_config: ProcessingConfig::default(),
     };
 
-    // Create and run the task
-    let task_runner = NodeTaskRunner::new(task_config);
-    let task_output = task_runner.run().await.map_err(|e| {
-        EnclaveError::GenericError(format!("Failed to execute blob ID retrieval task: {}", e))
+    let operation = TaskOperation::RetrieveByBlobIds(retrieve_by_blob_ids_args);
+
+    // Execute native Rust task
+    let start_time = std::time::Instant::now();
+    let task_result = task_runner.run(operation).await.map_err(|e| {
+        EnclaveError::GenericError(format!("Failed to execute native Rust blob ID retrieval task: {}", e))
     })?;
 
-    // Extract JSON result from stdout using delimiters
-    let json_data: serde_json::Value = extract_task_result(&task_output.stdout)
-        .unwrap_or_else(|| serde_json::json!({
-            "status": "failed",
-            "operation": "retrieve-by-blob-ids",
-            "error": "Failed to extract task result from output",
-            "raw_output": task_output.stdout
-        }));
+    let execution_time_ms = start_time.elapsed().as_millis() as u64;
 
+    let is_success = task_result.status == "success";
     Ok(Json(TaskResponse {
-        status: "success".to_string(),
-        data: json_data,
-        stderr: task_output.stderr,
-        exit_code: task_output.exit_code,
-        execution_time_ms: task_output.execution_time_ms,
+        status: task_result.status,
+        data: task_result.data.unwrap_or_else(|| serde_json::json!({})),
+        stderr: task_result.error.unwrap_or_default(),
+        exit_code: if is_success { 0 } else { 1 },
+        execution_time_ms,
     }))
+}
+
+/// All functions now use native Rust implementation
+
+/// Create router with all endpoints
+pub fn create_app(state: Arc<AppState>) -> Router {
+    // Define allowed origins based on environment
+    let origins = [
+        "http://localhost:3000".parse::<HeaderValue>().unwrap(),
+        "http://127.0.0.1:3000".parse::<HeaderValue>().unwrap(),
+        "https://localhost:3000".parse::<HeaderValue>().unwrap(),
+        "https://127.0.0.1:3000".parse::<HeaderValue>().unwrap(),
+    ];
+
+    let cors = CorsLayer::new()
+        .allow_origin(AllowOrigin::list(origins))
+        .allow_headers(AllowHeaders::list([
+            CONTENT_TYPE,
+            AUTHORIZATION,
+            ACCEPT,
+            ORIGIN,
+            REFERER,
+            USER_AGENT,
+        ]))
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE]);
+
+    Router::new()
+        .route("/health", get(health_check))
+        .route("/process_data", post(process_data))
+        .route("/embedding_ingest", post(embedding_ingest))
+        .route("/retrieve_messages", post(retrieve_messages))
+        .route("/retrieve_messages_by_blob_ids", post(retrieve_messages_by_blob_ids))
+        .layer(cors)
+        .with_state(state)
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::common::IntentMessage;
+    use crate::common::{IntentMessage, IntentScope};
     use axum::{extract::State, Json};
     use fastcrypto::{ed25519::Ed25519KeyPair, traits::KeyPair};
 

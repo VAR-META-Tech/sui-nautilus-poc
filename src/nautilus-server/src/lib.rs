@@ -10,7 +10,9 @@ use serde_json::json;
 
 pub mod app;
 pub mod common;
-pub mod task_runner;
+pub mod config;
+pub mod services;
+pub mod tasks;
 
 /// App state, at minimum needs to maintain the ephemeral keypair and environment configuration.  
 pub struct AppState {
@@ -159,6 +161,28 @@ impl AppState {
         
         Ok(())
     }
+    
+    /// Create native Rust TaskConfig from AppState
+    pub fn to_task_config(&self) -> crate::config::TaskConfig {
+        crate::config::TaskConfig {
+            move_package_id: self.move_package_id.clone(),
+            sui_secret_key: self.sui_secret_key.clone(),
+            walrus_config: crate::config::WalrusConfig {
+                aggregator_url: self.walrus_aggregator_url.clone(),
+                publisher_url: self.walrus_publisher_url.clone(),
+                epochs: self.walrus_epochs.clone(),
+            },
+            ollama_config: crate::config::OllamaConfig {
+                api_url: self.ollama_api_url.clone(),
+                model: self.ollama_model.clone(),
+            },
+            qdrant_config: crate::config::QdrantConfig {
+                url: self.qdrant_url.clone(),
+                collection_name: self.qdrant_collection_name.clone(),
+                api_key: self.qdrant_api_key.clone(),
+            },
+        }
+    }
 }
 
 /// Implement IntoResponse for EnclaveError.
@@ -185,7 +209,7 @@ mod tests {
     use super::*;
     use fastcrypto::{ed25519::Ed25519KeyPair, traits::KeyPair};
     use std::collections::HashMap;
-    use crate::task_runner::{NodeTaskRunner, TaskConfig};
+    // Tests removed since Node.js task runner has been replaced with native Rust
 
     #[tokio::test]
     async fn test_env_vars_passing() {
@@ -197,6 +221,13 @@ mod tests {
             walrus_aggregator_url: "https://aggregator.walrus-testnet.walrus.space".to_string(),
             walrus_publisher_url: "https://publisher.walrus-testnet.walrus.space".to_string(),
             walrus_epochs: "5".to_string(),
+            ollama_api_url: "http://localhost:11434".to_string(),
+            ollama_model: "nomic-embed-text".to_string(),
+            qdrant_url: "http://localhost:6333".to_string(),
+            qdrant_api_key: None,
+            qdrant_collection_name: "messages".to_string(),
+            embedding_batch_size: "10".to_string(),
+            vector_batch_size: "100".to_string(),
         };
 
         // Create environment variables map

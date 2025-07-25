@@ -28,6 +28,11 @@ echo "127.0.0.66   fullnode.mainnet.sui.io" >> /etc/hosts
 echo "127.0.0.67   fullnode.testnet.sui.io" >> /etc/hosts
 echo "127.0.0.68   seal-key-server-testnet-1.mystenlabs.com" >> /etc/hosts
 echo "127.0.0.69   seal-key-server-testnet-2.mystenlabs.com" >> /etc/hosts
+echo "127.0.0.70   dfusion-ollama.var-meta.com" >> /etc/hosts
+echo "127.0.0.71   dfusion-qdrant.var-meta.com" >> /etc/hosts
+echo "127.0.0.72   localhost:11434" >> /etc/hosts
+echo "127.0.0.73   localhost:6333" >> /etc/hosts
+
 
 
 
@@ -58,6 +63,11 @@ python3 /traffic_forwarder.py 127.0.0.66 443 3 8103 &
 python3 /traffic_forwarder.py 127.0.0.67 443 3 8104 &
 python3 /traffic_forwarder.py 127.0.0.68 443 3 8105 &
 python3 /traffic_forwarder.py 127.0.0.69 443 3 8106 &
+python3 /traffic_forwarder.py 127.0.0.70 443 3 8107 &
+python3 /traffic_forwarder.py 127.0.0.71 443 3 8108 &
+python3 /traffic_forwarder.py 127.0.0.72 443 3 8109 &
+python3 /traffic_forwarder.py 127.0.0.73 443 3 8110 &
+
 
 
 
