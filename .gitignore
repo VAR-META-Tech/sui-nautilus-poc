@@ -5,6 +5,7 @@ secrets-policy.json
 
 /move/enclave/build
 /move/app/build
+/move/telegram/build
 
 /src/nautilus-server/target
 
