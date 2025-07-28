@@ -21,3 +21,6 @@ start.sh
 CLAUDE.md
 
 /.claude
+
+# Logs
+deployment.log

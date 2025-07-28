@@ -52,8 +52,8 @@ Implement user-controlled permission system where:
 #### 1.3 Contract Deployment
 - [x] Update `move/app/Move.toml` with dependencies (no additional dependencies needed)
 - [x] Verify contract functions work correctly (all builds and tests pass)
-- [ ] Deploy to Sui testnet
-- [ ] Document contract addresses and object IDs
+- [x] Deploy to Sui testnet
+- [x] Document contract addresses and object IDs
 
 **Phase 1 Status: ✅ COMPLETED**
 - Contract implementation: ✅ Complete
