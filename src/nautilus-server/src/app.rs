@@ -384,9 +384,22 @@ pub async fn encrypt(
     Json(request): Json<EncryptRequest>,
 ) -> Result<Json<EncryptResponse>, EnclaveError> {
     let key_str = state.internal_encryption_secret_key();
+    // Fix base64 padding if missing (common issue with environment variables)
+    let padded_key_str = match key_str.len() % 4 {
+        0 => key_str.to_string(),
+        n => format!("{}{}", key_str, "=".repeat(4 - n))
+    };
+    
+    // println!("Debug: Key string length: {}", key_str.len());
+    // println!("Debug: Full key string: '{}'", key_str);
+    // println!("Debug: Key string is_empty: {}", key_str.is_empty());
+
     let key = general_purpose::STANDARD
-        .decode(key_str)
-        .map_err(|e| EnclaveError::GenericError(format!("Failed to decode key: {}", e)))?;
+        .decode(&padded_key_str)
+        .map_err(|e| {
+            println!("Debug: Base64 decode error: {}", e);
+            EnclaveError::GenericError(format!("Failed to decode key: {}. Key length: {}, Padded: {}", e, key_str.len(), padded_key_str))
+        })?;
     
     let data = request.data;
         
