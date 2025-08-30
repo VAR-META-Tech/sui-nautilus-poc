@@ -3,7 +3,7 @@ class BaseVectorDb {
     this.options = {
       batchSize: options.batchSize || 100,
       maxRetries: options.maxRetries || 3,
-      timeout: options.timeout || 10000,
+      timeout: options.timeout || 300000,
       ...options
     };
     this.connected = false;

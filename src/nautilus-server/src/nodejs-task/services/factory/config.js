@@ -4,7 +4,7 @@ const config = {
       ollama: {
         defaultBatchSize: 10,
         maxRetries: 3,
-        timeout: 30000
+        timeout: 300000
       }
     }
   },
@@ -13,7 +13,7 @@ const config = {
       qdrant: {
         defaultBatchSize: 100,
         maxRetries: 3,
-        timeout: 10000
+        timeout: 300000
       }
     }
   },
@@ -30,16 +30,16 @@ const config = {
       sui: {
         network: "testnet",
         maxRetries: 3,
-        timeout: 30000
+        timeout: 300000
       },
       walrus: {
         maxRetries: 3,
-        timeout: 30000
+        timeout: 300000
       },
       seal: {
         threshold: 2,
         maxRetries: 3,
-        timeout: 30000
+        timeout: 300000
       }
     }
   }

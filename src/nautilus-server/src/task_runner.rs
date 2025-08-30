@@ -28,7 +28,7 @@ impl Default for TaskConfig {
     fn default() -> Self {
         Self {
             task_path: "nodejs-task".to_string(),
-            timeout_secs: 30,
+            timeout_secs: 300,
             args: vec![],
             env_vars: HashMap::new(),
         }
