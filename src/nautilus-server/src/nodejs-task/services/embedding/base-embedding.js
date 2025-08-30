@@ -3,7 +3,7 @@ class BaseEmbedding {
     this.options = {
       batchSize: options.batchSize || 10,
       maxRetries: options.maxRetries || 3,
-      timeout: options.timeout || 30000,
+      timeout: options.timeout || 300000,
       ...options
     };
   }

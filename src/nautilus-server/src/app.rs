@@ -164,7 +164,7 @@ pub async fn process_data(
 
     let task_config = TaskConfig {
         task_path,
-        timeout_secs: request.payload.timeout_secs.unwrap_or(120),
+        timeout_secs: request.payload.timeout_secs.unwrap_or(300),
         args,
         env_vars,
     };

@@ -26,7 +26,7 @@ async fn main() -> Result<()> {
                 .long("timeout")
                 .value_name("SECONDS")
                 .help("Timeout for task execution in seconds")
-                .default_value("30")
+                .default_value("300")
         )
         .get_matches();
 
